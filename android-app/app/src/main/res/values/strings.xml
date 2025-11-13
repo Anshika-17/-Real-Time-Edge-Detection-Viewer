@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">Flam Edge Viewer</string>
     <string name="toggle_mode">Toggle Mode</string>
+    <string name="save_frame">Save Frame</string>
+    <string name="saved_to">Saved edge frame to %1$s</string>
+    <string name="saving_not_available">Switch to processed mode to save frames</string>
 </resources>

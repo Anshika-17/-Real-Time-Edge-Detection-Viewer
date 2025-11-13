@@ -5,14 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Flam Web Viewer</title>
     <style>
-      body { font-family: system-ui, sans-serif; margin: 2rem; }
+      body { font-family: system-ui, sans-serif; margin: 2rem; display: flex; flex-direction: column; gap: 1.5rem; }
       img { max-width: 100%; height: auto; border: 1px solid #ddd; }
-      .stats { margin-top: 1rem; }
-      .stats span { display: inline-block; min-width: 100px; }
+      .stats { display: flex; gap: 1rem; }
+      textarea { width: 100%; min-height: 140px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      button { padding: 0.6rem 1.4rem; font-size: 1rem; cursor: pointer; }
+      .panel { background: #f7f7f7; padding: 1rem; border-radius: 8px; }
     </style>
   </head>
   <body>
     <h1>Flam Web Viewer</h1>
+    <div class="panel">
+      <p>Paste a base64 PNG from the Android app (see <code>edge_frame_base64.txt</code>) or use the preloaded sample, then click Load Frame.</p>
+      <textarea id="input"></textarea>
+      <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem;">
+        <button id="load">Load Frame</button>
+        <button id="useSample">Use Sample</button>
+      </div>
+    </div>
     <img id="frame" alt="Processed frame" />
     <div class="stats">
       <span>FPS: <strong id="fps">0</strong></span>
