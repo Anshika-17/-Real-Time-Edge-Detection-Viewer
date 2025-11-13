@@ -1,50 +1,77 @@
 # Flam Edge Viewer
 
-Android + OpenCV (C++) + OpenGL ES + TypeScript web viewer.
+Real-time Edge Detection • Android (CameraX + OpenCV C++ + OpenGL ES) • Web Viewer (TypeScript)
+
+This project provides a complete real-time edge-detection pipeline:
+
+✔ Android camera processing (YUV → OpenCV Canny → OpenGL ES)
+✔ Native C++ acceleration
+✔ Real-time visualization
+✔ Save PNG + Base64 export
+✔ Web viewer for previewing edge frames
 
 ## Structure
+- **`android-app/`**
+  - CameraX preview + YUV_420_888 frame capture pipeline
+  - JNI bridge converting YUV → NV21 → RGBA using OpenCV (C++)
+  - OpenGL ES 2.0 renderer for real-time display of processed edge frames
+  - Save-to-gallery PNG output (scoped storage)
+  - Base64 export for loading frames in the web viewer
 
-- `android-app/`
-  - CameraX preview + analysis pipeline (raw preview and processed GL path)
-  - JNI bridge accepting YUV_420_888 planes and producing RGBA edge frames in native code
-  - OpenGL ES 2.0 renderer that uploads RGBA buffers without intermediate bitmaps
-  - Save-to-gallery + Base64 export for sharing frames with the web viewer
-- `web/`
-  - TypeScript viewer to preview processed frames from a base64 PNG string
-  - FPS tracker and resolution readout
+- **`web/`**
+  - TypeScript viewer for displaying Base64-encoded PNG frames
+  - Live FPS and resolution readout
+  - "Load Frame" input plus sample demo frame support
 
 ## Requirements
 
-- Android Studio (Giraffe+), SDK 34
-- NDK, CMake
-- OpenCV for Android (C++). Make sure the native SDK is available to CMake:
-  - Add environment variable `OpenCV_DIR` that points to `OpenCV-android-sdk/sdk/native/jni` **or**
-  - Edit `app/src/main/cpp/CMakeLists.txt` to point to your unpacked OpenCV SDK path
-- Copy OpenCV native binaries (`sdk/native/libs/<abi>/libopencv_java4.so` and friends) into `android-app/app/src/main/jniLibs/<abi>/` or package them via Gradle so they are available at runtime.
-- Node.js 18+
+- **Android Studio (Giraffe+)** with **Android SDK 34**
+- **NDK** and **CMake** installed via SDK Manager
+- **OpenCV for Android (C++ SDK)**  
+  - Set environment variable `OpenCV_DIR` pointing to:  
+    `OpenCV-android-sdk/sdk/native/jni`  
+    **or**
+  - Update `app/src/main/cpp/CMakeLists.txt` to reference your local OpenCV SDK path
+- **Native OpenCV libraries**  
+  (Ensure at least `arm64-v8a` and `armeabi-v7a` are included)
+- **Node.js 18+** for running the web viewer
 
-## Android setup
 
-1. Open `android-app` in Android Studio.
-2. Install NDK + CMake from SDK Manager.
-3. Provide OpenCV native SDK (`OpenCV_DIR`) as described above.
-4. Sync Gradle and build.
-5. Deploy to a physical device (camera required) and grant permission.
+## Android Setup
 
-### Runtime behaviour
+1. Open the `android-app/` folder in Android Studio.
+2. Install **NDK** and **CMake** from the SDK Manager.
+3. Provide the OpenCV native SDK path (`OpenCV_DIR`) as described in the Requirements section.
+4. Sync the project with Gradle and build the app.
+5. Deploy to a physical Android device (camera required) and grant camera/storage permissions.
 
-- Floating buttons (bottom-right):
-  - **Gallery icon** toggles Raw (CameraX preview) vs Processed (OpenCV + OpenGL) modes.
-  - **Save icon** (enabled only in processed mode) saves the most recent edge frame.
-- Processed mode path:
-  1. CameraX delivers `ImageProxy` in YUV_420_888.
-  2. JNI layer converts planes → NV21, runs Canny in OpenCV, returns RGBA buffer.
-  3. GLSurfaceView uploads the RGBA buffer directly as a texture and renders a full-screen quad.
-  4. The same RGBA snapshot is cached for saving/export.
-- Saving produces:
-  - PNG stored under `Pictures/FlamEdgeViewer/edge_YYYYMMDD_HHmmss.png` (scoped storage aware).
-  - `files/edge_frame_base64.txt` containing the identical frame encoded as Base64 (toast displays the file path).
-- Overlay shows live FPS, resolution, and mode state.
+
+### Runtime Behaviour
+
+- **Floating action buttons** (bottom-right):
+  - **Gallery Icon** — toggles between Raw CameraX preview and Processed (OpenCV + OpenGL) mode.
+  - **Save Icon** — enabled only in processed mode; saves the latest processed edge frame.
+
+- **Processed Mode Pipeline:**
+  1. CameraX provides frames as `ImageProxy` in **YUV_420_888** format.
+  2. JNI layer converts YUV planes → NV21, applies **Canny edge detection** using OpenCV (C++), and returns an **RGBA buffer**.
+  3. `GLSurfaceView` uploads the RGBA buffer directly as a texture and renders a full-screen quad using OpenGL ES 2.0.
+  4. The latest RGBA frame is cached for both PNG saving and Base64 export.
+
+- **Saving Output:**
+  - **PNG file:**  
+    `Pictures/FlamEdgeViewer/edge_YYYYMMDD_HHmmss.png`  
+    (Uses scoped storage, compatible with Android 10+)
+  - **Base64 export:**  
+    `files/edge_frame_base64.txt`  
+    Contains the same processed frame encoded as Base64.  
+    A toast displays the full file path after saving.
+
+- **Overlay Information:**
+  - Live FPS (frames per second)
+  - Current frame resolution
+  - Active mode (Raw / Processed)
+
 
 ## Web viewer
 
@@ -59,9 +86,11 @@ Open `http://localhost:5174`:
 - Paste the Base64 from `edge_frame_base64.txt` → **Load Frame** renders it.
 - **Use Sample** loads a bundled demo frame if you do not yet have device output.
 
-## Notes & next ideas
+## Notes & Next Ideas
 
-- Current native pipeline copies YUV planes into an NV21 buffer each frame for clarity. For production, reuse buffers or integrate with the CameraX NDK image reader for zero-copy conversions.
-- Tune Canny thresholds or add additional OpenGL shaders (invert, grayscale, etc.) by extending the fragment shader.
-- Add a lightweight HTTP/WebSocket bridge in Android if you need to stream frames to the web viewer in real time.
-- Consider adding simple instrumentation (frame timings, dropped-frame counter) and unit tests around JNI interop for robustness.
+- The current native pipeline copies YUV planes into an NV21 buffer every frame for simplicity.   For production, consider reusing buffers or using the CameraX NDK ImageReader for **zero-copy** conversions.
+- Experiment with Canny thresholds or extend the rendering pipeline with additional **OpenGL fragment shaders**  
+  (invert, grayscale, Sobel, blur, thresholding, etc.).
+- Add a lightweight **HTTP/WebSocket bridge** in the Android app to stream processed frames to the web viewer in real time.
+- Add instrumentation such as **frame timings**, **dropped-frame counters**, and **JNI interop tests** to improve robustness.
+
