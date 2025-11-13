@@ -6,8 +6,8 @@ Android + OpenCV (C++) + OpenGL ES + TypeScript web viewer.
 
 - `android-app/`
   - CameraX preview + analysis pipeline (raw preview and processed GL path)
-  - JNI bridge to native OpenCV Canny edge detector
-  - OpenGL ES 2.0 renderer that draws processed textures
+  - JNI bridge accepting YUV_420_888 planes and producing RGBA edge frames in native code
+  - OpenGL ES 2.0 renderer that uploads RGBA buffers without intermediate bitmaps
   - Save-to-gallery + Base64 export for sharing frames with the web viewer
 - `web/`
   - TypeScript viewer to preview processed frames from a base64 PNG string
@@ -17,24 +17,34 @@ Android + OpenCV (C++) + OpenGL ES + TypeScript web viewer.
 
 - Android Studio (Giraffe+), SDK 34
 - NDK, CMake
-- OpenCV for Android (C++), set `OpenCV_DIR` in CMake cache or environment
+- OpenCV for Android (C++). Make sure the native SDK is available to CMake:
+  - Add environment variable `OpenCV_DIR` that points to `OpenCV-android-sdk/sdk/native/jni` **or**
+  - Edit `app/src/main/cpp/CMakeLists.txt` to point to your unpacked OpenCV SDK path
+- Copy OpenCV native binaries (`sdk/native/libs/<abi>/libopencv_java4.so` and friends) into `android-app/app/src/main/jniLibs/<abi>/` or package them via Gradle so they are available at runtime.
 - Node.js 18+
 
 ## Android setup
 
 1. Open `android-app` in Android Studio.
-2. Ensure NDK and CMake are installed (SDK Manager).
-3. Provide OpenCV C++ SDK path so `find_package(OpenCV REQUIRED)` resolves. For example add environment variable `OpenCV_DIR` pointing to `OpenCV-android-sdk/sdk/native/jni`.
+2. Install NDK + CMake from SDK Manager.
+3. Provide OpenCV native SDK (`OpenCV_DIR`) as described above.
 4. Sync Gradle and build.
-5. Deploy to a physical device, grant camera permission at runtime.
+5. Deploy to a physical device (camera required) and grant permission.
 
-### App usage
+### Runtime behaviour
 
-- The floating toggle button switches between raw preview (CameraX) and processed edge view (OpenGL).
-- When in processed mode, tap the save button to:
-  - Store a PNG under `Pictures/FlamEdgeViewer/edge_YYYYMMDD_HHMMSS.png` (scoped storage aware).
-  - Write the same frame as base64 to `files/edge_frame_base64.txt` (shown in the toast). Copy this string for the web viewer.
-- On-screen overlay shows FPS, resolution, and current mode.
+- Floating buttons (bottom-right):
+  - **Gallery icon** toggles Raw (CameraX preview) vs Processed (OpenCV + OpenGL) modes.
+  - **Save icon** (enabled only in processed mode) saves the most recent edge frame.
+- Processed mode path:
+  1. CameraX delivers `ImageProxy` in YUV_420_888.
+  2. JNI layer converts planes → NV21, runs Canny in OpenCV, returns RGBA buffer.
+  3. GLSurfaceView uploads the RGBA buffer directly as a texture and renders a full-screen quad.
+  4. The same RGBA snapshot is cached for saving/export.
+- Saving produces:
+  - PNG stored under `Pictures/FlamEdgeViewer/edge_YYYYMMDD_HHmmss.png` (scoped storage aware).
+  - `files/edge_frame_base64.txt` containing the identical frame encoded as Base64 (toast displays the file path).
+- Overlay shows live FPS, resolution, and mode state.
 
 ## Web viewer
 
@@ -45,14 +55,13 @@ npm run build
 npm run start
 ```
 
-Open `http://localhost:5174` and:
-- Paste the PNG base64 from `edge_frame_base64.txt` into the textarea.
-- Click **Load Frame** to view the processed image with stats.
-- **Use Sample** loads a bundled demo edge image if you do not have device output yet.
+Open `http://localhost:5174`:
+- Paste the Base64 from `edge_frame_base64.txt` → **Load Frame** renders it.
+- **Use Sample** loads a bundled demo frame if you do not yet have device output.
 
-## Notes
+## Notes & next ideas
 
-- `YuvUtils.toBitmap` uses NV21 → JPEG → Bitmap for clarity; replace with a direct YUV → RGBA conversion for higher throughput.
-- Bundle OpenCV native libs (or use Android packaging options) when preparing a release build.
-- GLSL shaders can be extended for additional visual effects (invert, grayscale, etc.).
-- To expose frames live to the web tool, add an HTTP or WebSocket bridge that streams base64 from the Android layer.
+- Current native pipeline copies YUV planes into an NV21 buffer each frame for clarity. For production, reuse buffers or integrate with the CameraX NDK image reader for zero-copy conversions.
+- Tune Canny thresholds or add additional OpenGL shaders (invert, grayscale, etc.) by extending the fragment shader.
+- Add a lightweight HTTP/WebSocket bridge in Android if you need to stream frames to the web viewer in real time.
+- Consider adding simple instrumentation (frame timings, dropped-frame counter) and unit tests around JNI interop for robustness.

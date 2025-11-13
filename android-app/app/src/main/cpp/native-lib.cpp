@@ -1,60 +1,81 @@
 #include <jni.h>
-#include <android/bitmap.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <vector>
+#include <cstring>
 
 using namespace cv;
 
-static void bitmapToMat(JNIEnv* env, jobject bitmap, Mat& mat) {
-    AndroidBitmapInfo info;
-    void* pixels = nullptr;
-    AndroidBitmap_getInfo(env, bitmap, &info);
-    AndroidBitmap_lockPixels(env, bitmap, &pixels);
-    mat = Mat(info.height, info.width, CV_8UC4, pixels);
-    AndroidBitmap_unlockPixels(env, bitmap);
-}
-
-static jobject matToBitmap(JNIEnv* env, const Mat& src) {
-    jclass bitmapCls = env->FindClass("android/graphics/Bitmap");
-    jmethodID createBitmap = env->GetStaticMethodID(
-        bitmapCls,
-        "createBitmap",
-        "(IILandroid/graphics/Bitmap$Config;)Landroid/graphics/Bitmap;"
-    );
-
-    jclass configCls = env->FindClass("android/graphics/Bitmap$Config");
-    jmethodID rgba8888 = env->GetStaticMethodID(configCls, "valueOf", "(Ljava/lang/String;)Landroid/graphics/Bitmap$Config;");
-    jstring argb = env->NewStringUTF("ARGB_8888");
-    jobject config = env->CallStaticObjectMethod(configCls, rgba8888, argb);
-    env->DeleteLocalRef(argb);
-
-    jobject bmp = env->CallStaticObjectMethod(bitmapCls, createBitmap, src.cols, src.rows, config);
-
-    void* pixels = nullptr;
-    AndroidBitmapInfo info;
-    AndroidBitmap_getInfo(env, bmp, &info);
-    AndroidBitmap_lockPixels(env, bmp, &pixels);
-    Mat dst(info.height, info.width, CV_8UC4, pixels);
-    if (src.type() == CV_8UC1) {
-        cvtColor(src, dst, COLOR_GRAY2RGBA);
-    } else if (src.type() == CV_8UC4) {
-        src.copyTo(dst);
+namespace {
+    void copyYPlane(uint8_t* dest, const uint8_t* src, int width, int height, int rowStride) {
+        for (int row = 0; row < height; ++row) {
+            std::memcpy(dest + row * width, src + row * rowStride, width);
+        }
     }
-    AndroidBitmap_unlockPixels(env, bmp);
-    return bmp;
+
+    void copyUVPlanesNV21(
+        uint8_t* dest,
+        const uint8_t* uSrc,
+        const uint8_t* vSrc,
+        int width,
+        int height,
+        int rowStride,
+        int pixelStride
+    ) {
+        const int chromaHeight = height / 2;
+        for (int row = 0; row < chromaHeight; ++row) {
+            uint8_t* destRow = dest + row * width;
+            const uint8_t* uRow = uSrc + row * rowStride;
+            const uint8_t* vRow = vSrc + row * rowStride;
+            for (int col = 0; col < width / 2; ++col) {
+                destRow[col * 2] = vRow[col * pixelStride];     // V
+                destRow[col * 2 + 1] = uRow[col * pixelStride]; // U
+            }
+        }
+    }
 }
 
 extern "C"
-JNIEXPORT jobject JNICALL
-Java_com_flam_rnd_jni_NativeProcessor_cannyEdges(
+JNIEXPORT void JNICALL
+Java_com_flam_rnd_jni_NativeProcessor_processFrame(
         JNIEnv* env,
         jobject /*thiz*/,
-        jobject inputBitmap) {
+        jobject yBuffer,
+        jobject uBuffer,
+        jobject vBuffer,
+        jint width,
+        jint height,
+        jint yRowStride,
+        jint uvRowStride,
+        jint uvPixelStride,
+        jobject outBuffer) {
+    auto* yPtr = static_cast<uint8_t*>(env->GetDirectBufferAddress(yBuffer));
+    auto* uPtr = static_cast<uint8_t*>(env->GetDirectBufferAddress(uBuffer));
+    auto* vPtr = static_cast<uint8_t*>(env->GetDirectBufferAddress(vBuffer));
+    auto* outPtr = static_cast<uint8_t*>(env->GetDirectBufferAddress(outBuffer));
+
+    if (!yPtr || !uPtr || !vPtr || !outPtr) {
+        return;
+    }
+
+    const int ySize = width * height;
+    const int uvSize = ySize / 2;
+    std::vector<uint8_t> yuv(static_cast<size_t>(ySize + uvSize));
+    copyYPlane(yuv.data(), yPtr, width, height, yRowStride);
+    copyUVPlanesNV21(yuv.data() + ySize, uPtr, vPtr, width, height, uvRowStride, uvPixelStride);
+
+    Mat yuvMat(height + height / 2, width, CV_8UC1, yuv.data());
     Mat rgba;
-    bitmapToMat(env, inputBitmap, rgba);
+    cvtColor(yuvMat, rgba, COLOR_YUV2RGBA_NV21);
+
     Mat gray;
     cvtColor(rgba, gray, COLOR_RGBA2GRAY);
+
     Mat edges;
     Canny(gray, edges, 50, 150);
-    return matToBitmap(env, edges);
+
+    Mat edgesRgba;
+    cvtColor(edges, edgesRgba, COLOR_GRAY2RGBA);
+
+    std::memcpy(outPtr, edgesRgba.data, static_cast<size_t>(width * height * 4));
 }

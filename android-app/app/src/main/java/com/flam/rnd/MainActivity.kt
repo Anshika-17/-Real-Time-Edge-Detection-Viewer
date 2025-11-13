@@ -19,20 +19,17 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import com.flam.rnd.gl.SimpleGLRenderer
-import android.opengl.GLSurfaceView
-import androidx.camera.view.PreviewView
-import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.flam.rnd.camera.YuvUtils
 import com.flam.rnd.jni.NativeProcessor
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 import java.io.File
+import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicReference
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var previewView: PreviewView
-    private lateinit var glSurfaceView: GLSurfaceView
+    private lateinit var previewView: androidx.camera.view.PreviewView
+    private lateinit var glSurfaceView: android.opengl.GLSurfaceView
     private lateinit var toggleButton: FloatingActionButton
     private lateinit var saveButton: FloatingActionButton
     private lateinit var statsText: TextView
@@ -46,7 +43,10 @@ class MainActivity : AppCompatActivity() {
     private var frameCount = 0
     private var currentFps = 0
 
-    private val lastProcessedBitmap = AtomicReference<Bitmap?>()
+    private var outputWidth = 0
+    private var outputHeight = 0
+    private var workingBuffer: ByteBuffer? = null
+    @Volatile private var lastProcessedFrame: ByteBuffer? = null
 
     private val requestPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -66,15 +66,13 @@ class MainActivity : AppCompatActivity() {
 
         glSurfaceView.setEGLContextClientVersion(2)
         glSurfaceView.setRenderer(glRenderer)
-        glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+        glSurfaceView.renderMode = android.opengl.GLSurfaceView.RENDERMODE_CONTINUOUSLY
 
         toggleButton.setOnClickListener {
             showProcessed = !showProcessed
             updateModeUI()
         }
-        saveButton.setOnClickListener {
-            onSaveFrame()
-        }
+        saveButton.setOnClickListener { onSaveFrame() }
         updateModeUI()
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -119,6 +117,17 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private fun ensureBuffers(width: Int, height: Int) {
+        val capacity = width * height * 4
+        if (workingBuffer == null || workingBuffer!!.capacity() != capacity) {
+            workingBuffer = ByteBuffer.allocateDirect(capacity)
+        }
+        if (outputWidth != width || outputHeight != height) {
+            outputWidth = width
+            outputHeight = height
+        }
+    }
+
     private fun onFrame(image: ImageProxy) {
         frameCount += 1
         val now = System.currentTimeMillis()
@@ -130,20 +139,56 @@ class MainActivity : AppCompatActivity() {
             lastFpsTime = now
         }
 
-        if (showProcessed) {
-            val bmp = YuvUtils.toBitmap(image)
-            val output = NativeProcessor.cannyEdges(bmp)
-            lastProcessedBitmap.getAndSet(output.copy(output.config, false))?.recycle()
-            glSurfaceView.queueEvent { glRenderer.updateFrame(output) }
-            glSurfaceView.requestRender()
-            runOnUiThread {
-                statsText.text = "FPS: $currentFps  Res: ${image.width}x${image.height}  Mode: Processed"
-            }
-        } else {
-            // Raw mode: show camera preview, skip JNI/GL upload
+        if (!showProcessed) {
             runOnUiThread {
                 statsText.text = "FPS: $currentFps  Res: ${image.width}x${image.height}  Mode: Raw"
             }
+            return
+        }
+
+        ensureBuffers(image.width, image.height)
+        val buffer = workingBuffer ?: return
+
+        val planes = image.planes
+        val yPlane = planes[0]
+        val uPlane = planes[1]
+        val vPlane = planes[2]
+
+        val yBuffer = yPlane.buffer
+        val uBuffer = uPlane.buffer
+        val vBuffer = vPlane.buffer
+
+        yBuffer.position(0)
+        uBuffer.position(0)
+        vBuffer.position(0)
+        buffer.position(0)
+
+        NativeProcessor.processFrame(
+            yBuffer,
+            uBuffer,
+            vBuffer,
+            image.width,
+            image.height,
+            yPlane.rowStride,
+            uPlane.rowStride,
+            uPlane.pixelStride,
+            buffer
+        )
+
+        buffer.position(0)
+        val snapshot = ByteBuffer.allocateDirect(buffer.capacity())
+        snapshot.put(buffer)
+        snapshot.position(0)
+        lastProcessedFrame = snapshot.duplicate().apply { position(0) }
+
+        val glBuffer = snapshot.duplicate().apply { position(0) }
+        glSurfaceView.queueEvent {
+            glRenderer.updateFrame(glBuffer, outputWidth, outputHeight)
+        }
+        glSurfaceView.requestRender()
+
+        runOnUiThread {
+            statsText.text = "FPS: $currentFps  Res: ${image.width}x${image.height}  Mode: Processed"
         }
     }
 
@@ -152,11 +197,12 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.saving_not_available, Toast.LENGTH_SHORT).show()
             return
         }
-        val bitmap = lastProcessedBitmap.get()
-        if (bitmap == null) {
-            Toast.makeText(this, "No processed frame yet", Toast.LENGTH_SHORT).show()
+        val buffer = lastProcessedFrame?.duplicate()?.apply { position(0) }
+        if (buffer == null || outputWidth == 0 || outputHeight == 0) {
+            Toast.makeText(this, R.string.no_frame, Toast.LENGTH_SHORT).show()
             return
         }
+        val bitmap = createBitmapFromBuffer(buffer, outputWidth, outputHeight)
         val uri = saveBitmapToGallery(bitmap)
         val base64Path = saveBitmapBase64(bitmap)
         val message = buildString {
@@ -169,8 +215,17 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
+    private fun createBitmapFromBuffer(buffer: ByteBuffer, width: Int, height: Int): Bitmap {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        buffer.position(0)
+        bitmap.copyPixelsFromBuffer(buffer)
+        buffer.position(0)
+        return bitmap
+    }
+
     private fun saveBitmapToGallery(bitmap: Bitmap): Uri? {
-        val name = "edge_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(System.currentTimeMillis()) + ".png"
+        val name = "edge_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+            .format(System.currentTimeMillis()) + ".png"
         val resolver = contentResolver
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
@@ -202,7 +257,10 @@ class MainActivity : AppCompatActivity() {
         return try {
             val byteStream = java.io.ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, byteStream)
-            val base64 = android.util.Base64.encodeToString(byteStream.toByteArray(), android.util.Base64.NO_WRAP)
+            val base64 = android.util.Base64.encodeToString(
+                byteStream.toByteArray(),
+                android.util.Base64.NO_WRAP
+            )
             file.writeText(base64)
             file.absolutePath
         } catch (e: Exception) {

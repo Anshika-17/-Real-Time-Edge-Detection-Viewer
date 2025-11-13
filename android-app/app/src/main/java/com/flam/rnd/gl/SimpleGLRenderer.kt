@@ -1,9 +1,7 @@
 package com.flam.rnd.gl
 
-import android.graphics.Bitmap
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
-import android.opengl.GLUtils
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -17,7 +15,10 @@ class SimpleGLRenderer : GLSurfaceView.Renderer {
     private var positionHandle = 0
     private var texCoordHandle = 0
 
-    private val pendingBitmap = AtomicReference<Bitmap?>()
+    private val pendingFrame = AtomicReference<FrameData?>()
+    private var texturePrepared = false
+    private var currentWidth = 0
+    private var currentHeight = 0
 
     private val vertexData: FloatBuffer = floatBufferOf(
         // X, Y, U, V
@@ -51,12 +52,42 @@ class SimpleGLRenderer : GLSurfaceView.Renderer {
     override fun onDrawFrame(gl: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
-        pendingBitmap.getAndSet(null)?.let { bmp ->
-            // Upload bitmap to texture
+        pendingFrame.getAndSet(null)?.let { frame ->
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
-            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0)
+            frame.buffer.position(0)
+            if (!texturePrepared || frame.width != currentWidth || frame.height != currentHeight) {
+                GLES20.glTexImage2D(
+                    GLES20.GL_TEXTURE_2D,
+                    0,
+                    GLES20.GL_RGBA,
+                    frame.width,
+                    frame.height,
+                    0,
+                    GLES20.GL_RGBA,
+                    GLES20.GL_UNSIGNED_BYTE,
+                    frame.buffer
+                )
+                texturePrepared = true
+                currentWidth = frame.width
+                currentHeight = frame.height
+            } else {
+                GLES20.glTexSubImage2D(
+                    GLES20.GL_TEXTURE_2D,
+                    0,
+                    0,
+                    0,
+                    frame.width,
+                    frame.height,
+                    GLES20.GL_RGBA,
+                    GLES20.GL_UNSIGNED_BYTE,
+                    frame.buffer
+                )
+            }
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
-            bmp.recycle()
+        }
+
+        if (!texturePrepared) {
+            return
         }
 
         GLES20.glUseProgram(program)
@@ -79,9 +110,12 @@ class SimpleGLRenderer : GLSurfaceView.Renderer {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
 
-    fun updateFrame(bitmap: Bitmap) {
-        // Called from UI/analyzer thread. Renderer will upload on GL thread.
-        pendingBitmap.getAndSet(bitmap)?.recycle()
+    fun updateFrame(buffer: ByteBuffer, width: Int, height: Int) {
+        val copy = ByteBuffer.allocateDirect(buffer.remaining())
+        val dup = buffer.duplicate().apply { position(0) }
+        copy.put(dup)
+        copy.position(0)
+        pendingFrame.set(FrameData(copy, width, height))
     }
 
     private fun buildProgram(vs: String, fs: String): Int {
@@ -134,6 +168,8 @@ class SimpleGLRenderer : GLSurfaceView.Renderer {
             }
         """
     }
+
+    private data class FrameData(val buffer: ByteBuffer, val width: Int, val height: Int)
 }
 
 private fun floatBufferOf(vararg floats: Float): FloatBuffer {

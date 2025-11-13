@@ -4,4 +4,5 @@
     <string name="save_frame">Save Frame</string>
     <string name="saved_to">Saved edge frame to %1$s</string>
     <string name="saving_not_available">Switch to processed mode to save frames</string>
+    <string name="no_frame">No processed frame yet</string>
 </resources>
