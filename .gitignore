@@ -1,0 +1,15 @@
+# Android
+**/build/
+/.gradle/
+/local.properties
+/captures/
+.externalNativeBuild/
+*.iml
+.idea/
+app/release/
+.DS_Store
+
+# Node/Web
+node_modules/
+dist/
+.npmrc

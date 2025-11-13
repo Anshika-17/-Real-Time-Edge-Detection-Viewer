@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flam Web Viewer</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; }
+      img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+      .stats { margin-top: 1rem; }
+      .stats span { display: inline-block; min-width: 100px; }
+    </style>
+  </head>
+  <body>
+    <h1>Flam Web Viewer</h1>
+    <img id="frame" alt="Processed frame" />
+    <div class="stats">
+      <span>FPS: <strong id="fps">0</strong></span>
+      <span>Resolution: <strong id="res">-</strong></span>
+    </div>
+    <script type="module" src="./dist/index.js"></script>
+  </body>
+</html>
