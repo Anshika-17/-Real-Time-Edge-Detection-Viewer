@@ -94,3 +94,4 @@ Open `http://localhost:5174`:
 - Add a lightweight **HTTP/WebSocket bridge** in the Android app to stream processed frames to the web viewer in real time.
 - Add instrumentation such as **frame timings**, **dropped-frame counters**, and **JNI interop tests** to improve robustness.
 
+<img width="1891" height="888" alt="image" src="https://github.com/user-attachments/assets/b36298fe-97df-44a3-91ec-7e28faa2e156" />
