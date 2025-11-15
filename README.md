@@ -95,3 +95,5 @@ Open `http://localhost:5174`:
 - Add instrumentation such as **frame timings**, **dropped-frame counters**, and **JNI interop tests** to improve robustness.
 
 <img width="1891" height="888" alt="image" src="https://github.com/user-attachments/assets/b36298fe-97df-44a3-91ec-7e28faa2e156" />
+<img width="1590" height="760" alt="image" src="https://github.com/user-attachments/assets/44052e8f-2e19-4563-8b0b-fbb7421440da" />
+
